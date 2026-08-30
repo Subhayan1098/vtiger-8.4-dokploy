@@ -1,0 +1,89 @@
+services:
+
+  db:
+    image: mariadb:10.11
+    restart: unless-stopped
+
+    environment:
+      MYSQL_ROOT_PASSWORD: "CHANGE_ROOT_PASSWORD"
+      MYSQL_DATABASE: "vtigercrm"
+      MYSQL_USER: "vtiger_user"
+      MYSQL_PASSWORD: "CHANGE_DB_PASSWORD"
+
+    command:
+      - --sql-mode=
+      - --transaction-isolation=READ-COMMITTED
+      - --innodb-file-per-table=1
+      - --local-infile=1
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max_allowed_packet=128M
+
+    volumes:
+      - vtiger_db:/var/lib/mysql
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mariadb-admin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+
+  vtiger:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    restart: unless-stopped
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    environment:
+      DB_HOST: db
+      DB_USER: vtiger_user
+      DB_PASSWORD: "CHANGE_DB_PASSWORD"
+      DB_NAME: vtigercrm
+
+    volumes:
+      - vtiger_app:/var/www/html
+
+    ports:
+      - "8081:80"
+
+
+  cron:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    restart: unless-stopped
+
+    depends_on:
+      db:
+        condition: service_healthy
+      vtiger:
+        condition: service_started
+
+    volumes:
+      - vtiger_app:/var/www/html
+
+    command:
+      - /bin/bash
+      - -c
+      - |
+        while true; do
+          if [ -f /var/www/html/cron/vtigercron.php ]; then
+            php /var/www/html/cron/vtigercron.php || true
+          fi
+          sleep 300
+        done
+
+
+volumes:
+  vtiger_db:
+  vtiger_app:
